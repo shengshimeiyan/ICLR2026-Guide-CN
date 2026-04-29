@@ -4,3 +4,4 @@ __pycache__/
 .env
 *.bak
 ICLR2026_VLM_MLLM_中文版.html
+text_cnn_classification/
