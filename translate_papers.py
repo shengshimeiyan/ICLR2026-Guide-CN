@@ -14,6 +14,22 @@ ICLR 2026 VLM/MLLM 论文批量中文化分析脚本
 import json
 import os
 from pathlib import Path
+
+# ---- 自动加载同目录下的 .env 文件（不依赖 python-dotenv） ----
+# 注意：.env 中的值会**覆盖** shell 里 export 的同名变量。
+def _load_dotenv():
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        os.environ[k.strip()] = v.strip().strip("'\"")
+
+_load_dotenv()
+
 from openai import OpenAI
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -84,7 +100,8 @@ def analyze_paper(client, paper):
 
 def main():
     if API_KEY == "YOUR_API_KEY_HERE":
-        raise SystemExit("❌ 请先设置环境变量 OPENAI_API_KEY，或在脚本里填入 API_KEY")
+        raise SystemExit("❌ 请先在同目录 .env 写 OPENAI_API_KEY，或 export OPENAI_API_KEY")
+    print(f"使用 LLM: {MODEL} @ {BASE_URL}  (key: {API_KEY[:8]}...)")
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
     data = json.loads(Path(INPUT_JSON).read_text(encoding="utf-8"))

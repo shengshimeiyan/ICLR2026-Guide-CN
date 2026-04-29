@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Social Preview</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #1a1a2e;
+  }
+  /* 截图时把这个 .card 部分截下来，正好 1280×640 */
+  .card {
+    width: 1280px;
+    height: 640px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+    color: #fff;
+    padding: 70px 80px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  /* 背景装饰圆 */
+  .card::before {
+    content: "";
+    position: absolute;
+    top: -150px; right: -150px;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+  }
+  .card::after {
+    content: "";
+    position: absolute;
+    bottom: -200px; left: -200px;
+    width: 600px; height: 600px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.05);
+  }
+  .top {
+    position: relative;
+    z-index: 2;
+  }
+  .badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.2);
+    backdrop-filter: blur(10px);
+    padding: 8px 18px;
+    border-radius: 30px;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    margin-bottom: 28px;
+    border: 1px solid rgba(255,255,255,0.3);
+  }
+  h1 {
+    font-size: 78px;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 22px;
+    letter-spacing: -1px;
+    text-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  }
+  h1 .highlight {
+    background: linear-gradient(90deg, #ffeaa7, #fab1a0);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .subtitle {
+    font-size: 28px;
+    font-weight: 400;
+    opacity: 0.95;
+    line-height: 1.5;
+    max-width: 950px;
+  }
+  .bottom {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .stats {
+    display: flex;
+    gap: 24px;
+  }
+  .stat {
+    background: rgba(255,255,255,0.15);
+    backdrop-filter: blur(10px);
+    padding: 18px 28px;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.2);
+    min-width: 130px;
+  }
+  .stat .num {
+    font-size: 44px;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat .lbl {
+    font-size: 15px;
+    opacity: 0.9;
+    font-weight: 500;
+  }
+  .repo {
+    text-align: right;
+    font-size: 18px;
+    opacity: 0.85;
+    line-height: 1.6;
+  }
+  .repo .url {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 16px;
+    background: rgba(0,0,0,0.2);
+    padding: 6px 14px;
+    border-radius: 8px;
+    display: inline-block;
+    margin-top: 6px;
+  }
+  /* 截图说明（不会被截进去） */
+  .hint {
+    color: #888;
+    padding: 20px;
+    font-size: 14px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="top">
+    <span class="badge">📚 ICLR 2026 · VLM / MLLM</span>
+    <h1>用 <span class="highlight">GPT-5</span> 替你读完了<br>460 篇多模态论文 🤯</h1>
+    <p class="subtitle">中文六维度导读 · 18 个子领域 · 一个静态网页带你扫完前沿</p>
+  </div>
+  <div class="bottom">
+    <div class="stats">
+      <div class="stat"><div class="num">460</div><div class="lbl">VLM 论文</div></div>
+      <div class="stat"><div class="num">18</div><div class="lbl">子领域</div></div>
+      <div class="stat"><div class="num">5,352</div><div class="lbl">原始接收论文</div></div>
+    </div>
+    <div class="repo">
+      ⭐ Star on GitHub
+      <div class="url">JenniferZhao0531/ICLR-VLM-MLLM-papers</div>
+    </div>
+  </div>
+</div>
+<div class="hint">
+  ↑ 用 macOS <b>Cmd+Shift+4</b> 然后按一下 <b>空格</b>，再点上面卡片就能直接截图整张卡片<br>
+  或者把浏览器窗口拉宽到 ≥1320px，使卡片完整显示后再框选截图
+</div>
+</body>
+</html>
