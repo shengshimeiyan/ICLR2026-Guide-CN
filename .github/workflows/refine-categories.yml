@@ -81,8 +81,8 @@ jobs:
           API_MAX_RETRIES: "6"
           API_RETRY_SLEEP: "10"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: https://inference.dahl.global/v1
-          OPENAI_MODEL: moonshotai/Kimi-K2.6
+          OPENAI_BASE_URL: https://open.bigmodel.cn/api/paas/v4
+          OPENAI_MODEL: glm-4.7-flash
           NOTIFYX_API_KEY: ${{ secrets.NOTIFYX_API_KEY }}
           NOTIFYX_TEAM: ${{ inputs.notify_team }}
         run: python -u refine_categories.py
