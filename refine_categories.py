@@ -15,6 +15,8 @@ import json
 import os
 import re
 import time
+import urllib.error
+import urllib.request
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -56,6 +58,10 @@ BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "5"))
 API_TIMEOUT = float(os.environ.get("API_TIMEOUT", "90"))
 API_MAX_RETRIES = int(os.environ.get("API_MAX_RETRIES", "6"))
 API_RETRY_SLEEP = float(os.environ.get("API_RETRY_SLEEP", "10"))
+NOTIFYX_API_KEY = os.environ.get("NOTIFYX_API_KEY", "")
+NOTIFYX_TEAM = os.environ.get("NOTIFYX_TEAM", "")
+NOTIFYX_ENDPOINT = os.environ.get("NOTIFYX_ENDPOINT", "https://www.notifyx.cn/api/v1/send")
+NOTIFYX_MILESTONES = (25, 50, 75, 100)
 
 
 SUBCATEGORY_TAXONOMY = {
@@ -494,6 +500,65 @@ def select_shard(papers, shard_index=0, shard_total=1):
     return [paper for idx, paper in enumerate(papers) if idx % shard_total == shard_index]
 
 
+def get_reached_milestones(done, total, sent):
+    if total <= 0:
+        return []
+    percent = int(done * 100 / total)
+    return [milestone for milestone in NOTIFYX_MILESTONES if milestone <= percent and milestone not in sent]
+
+
+def build_notifyx_payload(percent, done, total, shard_index=0, shard_total=1, team=""):
+    shard_text = "" if shard_total == 1 else f" shard {shard_index}/{shard_total}"
+    payload = {
+        "title": f"ACL 2026 二级分类进度 {percent}%",
+        "content": (
+            f"ACL 2026 二级分类{shard_text}已完成 {percent}% "
+            f"({done}/{total})。\n模型：{MODEL}\n输出：{OUTPUT_JSON}"
+        ),
+        "description": f"ACL 2026 category refinement {percent}% ({done}/{total})",
+    }
+    if team:
+        payload["team"] = team
+    return payload
+
+
+def send_notifyx(payload, api_key=NOTIFYX_API_KEY, endpoint=NOTIFYX_ENDPOINT):
+    if not api_key:
+        return False
+    url = f"{endpoint.rstrip('/')}/{api_key}"
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            response.read()
+        return True
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        print(f"[notifyx failed] {e}")
+        return False
+
+
+def notify_progress(done, total, sent):
+    if not NOTIFYX_API_KEY or SHARD_TOTAL != 1:
+        return
+    for milestone in get_reached_milestones(done, total, sent):
+        payload = build_notifyx_payload(
+            percent=milestone,
+            done=done,
+            total=total,
+            shard_index=SHARD_INDEX,
+            shard_total=SHARD_TOTAL,
+            team=NOTIFYX_TEAM,
+        )
+        if send_notifyx(payload):
+            print(f"[notifyx] sent {milestone}% progress notification")
+        sent.add(milestone)
+
+
 def save(records, meta, partial=False):
     output = {
         "meta": {
@@ -522,6 +587,8 @@ def main():
     papers = select_shard(papers, SHARD_INDEX, SHARD_TOTAL)
     if SHARD_TOTAL > 1:
         print(f"Shard: {SHARD_INDEX}/{SHARD_TOTAL}, papers in shard: {len(papers)}")
+    if NOTIFYX_API_KEY and SHARD_TOTAL != 1:
+        print("NotifyX progress notifications are disabled for parallel shards.")
 
     print(f"Using LLM: {MODEL} @ {BASE_URL} (key: {API_KEY[:8]}...)")
     print(f"To refine: {len(papers)} papers, batch={BATCH_SIZE}, workers={MAX_WORKERS}")
@@ -541,6 +608,7 @@ def main():
     results = []
     n_fail = 0
     batches = list(chunks(pending, BATCH_SIZE))
+    progress_sent = set()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(refine_batch, client, batch): batch for batch in batches}
@@ -555,10 +623,12 @@ def main():
                     pbar.update(1)
                 checkpoint = [refined[p["id"]] for p in papers if p["id"] in refined]
                 save(checkpoint, data.get("meta", {}), partial=len(checkpoint) < len(papers))
+                notify_progress(len(checkpoint), len(papers), progress_sent)
 
     for paper in papers:
         results.append(refined.get(paper["id"], paper))
     save(results, data.get("meta", {}), partial=False)
+    notify_progress(len(results), len(papers), progress_sent)
 
     print(f"[OK] Output: {OUTPUT_JSON}")
     print(f"Success: {len(results) - n_fail} Failed: {n_fail}")

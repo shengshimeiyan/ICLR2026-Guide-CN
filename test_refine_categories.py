@@ -2,6 +2,8 @@ import unittest
 
 from refine_categories import (
     SUBCATEGORY_TAXONOMY,
+    build_notifyx_payload,
+    get_reached_milestones,
     is_valid_refined_record,
     parse_subcategory,
     refine_record,
@@ -77,6 +79,22 @@ class RefineCategoriesTest(unittest.TestCase):
     def test_select_shard_rejects_invalid_config(self):
         with self.assertRaises(ValueError):
             select_shard([{"id": "p1"}], shard_index=2, shard_total=2)
+
+    def test_progress_milestones_are_emitted_once(self):
+        sent = set()
+
+        self.assertEqual([25], get_reached_milestones(done=25, total=100, sent=sent))
+        sent.add(25)
+        self.assertEqual([], get_reached_milestones(done=49, total=100, sent=sent))
+        self.assertEqual([50], get_reached_milestones(done=50, total=100, sent=sent))
+        self.assertEqual([75, 100], get_reached_milestones(done=100, total=100, sent={25, 50}))
+
+    def test_notifyx_payload_includes_progress_summary(self):
+        payload = build_notifyx_payload(percent=75, done=75, total=100, shard_index=0, shard_total=1, team="abc")
+
+        self.assertEqual("ACL 2026 二级分类进度 75%", payload["title"])
+        self.assertIn("75/100", payload["content"])
+        self.assertEqual("abc", payload["team"])
 
 
 if __name__ == "__main__":

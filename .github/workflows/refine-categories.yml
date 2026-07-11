@@ -23,6 +23,10 @@ on:
         description: "Final merged JSON filename"
         required: true
         default: "ACL2026_refined_categories_full.json"
+      notify_team:
+        description: "Optional NotifyX team id"
+        required: false
+        default: ""
 
 jobs:
   prepare:
@@ -79,6 +83,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: https://inference.dahl.global/v1
           OPENAI_MODEL: moonshotai/Kimi-K2.6
+          NOTIFYX_API_KEY: ${{ secrets.NOTIFYX_API_KEY }}
+          NOTIFYX_TEAM: ${{ inputs.notify_team }}
         run: python -u refine_categories.py
 
       - name: Upload shard artifact
