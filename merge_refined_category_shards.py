@@ -9,13 +9,15 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-from refine_categories import is_valid_refined_record
+from refine_categories import is_valid_refined_record, stratified_sample
 
 
 INPUT_JSON = os.environ.get("INPUT_JSON", "ACL2026_all_papers.json")
 SHARD_GLOB = os.environ.get("SHARD_GLOB", "ACL2026_refined_categories_shard_*.json")
 OUTPUT_JSON = os.environ.get("OUTPUT_JSON", "ACL2026_refined_categories_full.json")
 REPORT_MD = os.environ.get("REPORT_MD", "ACL2026_refined_categories_full_report.md")
+LIMIT_PAPERS = int(os.environ.get("LIMIT_PAPERS", "0") or "0")
+STRATIFIED_SAMPLE = os.environ.get("STRATIFIED_SAMPLE", "0") == "1"
 
 
 def load_json(path):
@@ -49,10 +51,16 @@ def write_report(path, summary, category_counts, primary_counts):
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def merge_refined_shards(source_json, shard_glob, output_json, report_md):
+def select_merge_papers(papers, limit_papers=0, stratified=False):
+    if not limit_papers:
+        return list(papers)
+    return stratified_sample(papers, limit_papers) if stratified else list(papers[:limit_papers])
+
+
+def merge_refined_shards(source_json, shard_glob, output_json, report_md, limit_papers=0, stratified=False):
     source_path = Path(source_json)
     source = load_json(source_path)
-    base_papers = source["papers"]
+    base_papers = select_merge_papers(source["papers"], limit_papers=limit_papers, stratified=stratified)
     base_by_id = {paper["id"]: paper for paper in base_papers}
 
     refined_by_id = {}
@@ -98,6 +106,8 @@ def merge_refined_shards(source_json, shard_glob, output_json, report_md):
             "category_refine_partial": False,
             "category_merge_source": "GitHub Actions shards",
             "category_merge_shard_files": len(shard_paths),
+            "category_merge_limit_papers": limit_papers,
+            "category_merge_stratified_sample": stratified,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
         "papers": merged,
@@ -107,7 +117,14 @@ def merge_refined_shards(source_json, shard_glob, output_json, report_md):
 
 
 def main():
-    summary = merge_refined_shards(INPUT_JSON, SHARD_GLOB, OUTPUT_JSON, REPORT_MD)
+    summary = merge_refined_shards(
+        INPUT_JSON,
+        SHARD_GLOB,
+        OUTPUT_JSON,
+        REPORT_MD,
+        limit_papers=LIMIT_PAPERS,
+        stratified=STRATIFIED_SAMPLE,
+    )
     print(f"records={summary['records']}")
     print(f"shard_files={summary['shard_files']}")
     print(f"missing={len(summary['missing'])}")

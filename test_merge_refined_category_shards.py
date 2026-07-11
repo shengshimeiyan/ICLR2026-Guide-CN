@@ -11,6 +11,39 @@ def write_json(path, payload):
 
 
 class MergeRefinedCategoryShardsTest(unittest.TestCase):
+    def test_merge_respects_limit_papers_for_smoke_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "ACL2026_all_papers.json"
+            output = root / "smoke.json"
+            report = root / "smoke_report.md"
+            base_papers = [
+                {"id": f"p{i}", "primary_area": "大语言模型与基础模型", "category": "大语言模型与基础模型"}
+                for i in range(6)
+            ]
+            write_json(source, {"meta": {"total": 6}, "papers": base_papers})
+            for shard_idx in range(2):
+                shard_papers = []
+                for paper in base_papers[:4][shard_idx::2]:
+                    shard_papers.append({**paper, "category": "Agent 与工具使用", "category_refined_by": "test"})
+                write_json(
+                    root / f"ACL2026_refined_categories_shard_{shard_idx}.json",
+                    {"meta": {"category_shard_index": shard_idx, "category_shard_total": 2}, "papers": shard_papers},
+                )
+
+            summary = merge_refined_shards(
+                source,
+                str(root / "ACL2026_refined_categories_shard_*.json"),
+                output,
+                report,
+                limit_papers=4,
+            )
+
+            self.assertEqual(4, summary["records"])
+            self.assertEqual([], summary["missing"])
+            merged = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(["p0", "p1", "p2", "p3"], [p["id"] for p in merged["papers"]])
+
     def test_merge_preserves_original_order_and_validates_records(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

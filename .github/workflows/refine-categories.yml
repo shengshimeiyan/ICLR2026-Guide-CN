@@ -122,6 +122,8 @@ jobs:
           SHARD_GLOB: ACL2026_refined_categories_shard_*.json
           OUTPUT_JSON: ${{ inputs.output_name }}
           REPORT_MD: ACL2026_refined_categories_full_report.md
+          LIMIT_PAPERS: ${{ inputs.limit_papers }}
+          STRATIFIED_SAMPLE: "0"
         run: python -u merge_refined_category_shards.py
 
       - name: Upload merged result
