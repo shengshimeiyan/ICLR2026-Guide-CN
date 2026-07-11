@@ -1,0 +1,128 @@
+name: Refine ACL 2026 Categories
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_total:
+        description: "Number of parallel shards"
+        required: true
+        default: "16"
+      limit_papers:
+        description: "Limit papers for smoke tests; 0 means full run"
+        required: true
+        default: "0"
+      max_workers:
+        description: "Workers inside each shard"
+        required: true
+        default: "1"
+      batch_size:
+        description: "Papers per LLM batch"
+        required: true
+        default: "5"
+      output_name:
+        description: "Final merged JSON filename"
+        required: true
+        default: "ACL2026_refined_categories_full.json"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Build shard matrix
+        id: matrix
+        shell: python
+        run: |
+          import json
+          import os
+
+          total = int("${{ inputs.shard_total }}")
+          if total < 1 or total > 64:
+              raise SystemExit("shard_total must be between 1 and 64")
+          matrix = {"shard": list(range(total))}
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"matrix={json.dumps(matrix)}\n")
+
+  refine:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run shard
+        env:
+          INPUT_JSON: ACL2026_all_papers.json
+          OUTPUT_JSON: ACL2026_refined_categories_shard_${{ matrix.shard }}.json
+          LIMIT_PAPERS: ${{ inputs.limit_papers }}
+          STRATIFIED_SAMPLE: "0"
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: ${{ inputs.shard_total }}
+          MAX_WORKERS: ${{ inputs.max_workers }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          API_TIMEOUT: "90"
+          API_MAX_RETRIES: "6"
+          API_RETRY_SLEEP: "10"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: https://inference.dahl.global/v1
+          OPENAI_MODEL: moonshotai/Kimi-K2.6
+        run: python -u refine_categories.py
+
+      - name: Upload shard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: refined-shard-${{ matrix.shard }}
+          path: ACL2026_refined_categories_shard_${{ matrix.shard }}.json
+          if-no-files-found: error
+
+  merge:
+    needs: refine
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Download shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: refined-shard-*
+          merge-multiple: true
+
+      - name: Merge shards
+        env:
+          INPUT_JSON: ACL2026_all_papers.json
+          SHARD_GLOB: ACL2026_refined_categories_shard_*.json
+          OUTPUT_JSON: ${{ inputs.output_name }}
+          REPORT_MD: ACL2026_refined_categories_full_report.md
+        run: python -u merge_refined_category_shards.py
+
+      - name: Upload merged result
+        uses: actions/upload-artifact@v4
+        with:
+          name: refined-categories-merged
+          path: |
+            ${{ inputs.output_name }}
+            ACL2026_refined_categories_full_report.md
+          if-no-files-found: error
