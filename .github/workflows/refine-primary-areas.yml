@@ -11,6 +11,10 @@ on:
         description: "Limit papers for smoke tests; 0 means full run"
         required: true
         default: "0"
+      stratified_sample:
+        description: "Use stratified sampling when limit_papers > 0"
+        required: true
+        default: "1"
       max_workers:
         description: "Workers inside each shard"
         required: true
@@ -72,7 +76,7 @@ jobs:
           INPUT_JSON: ACL2026_all_papers.json
           OUTPUT_JSON: ACL2026_refined_primary_areas_shard_${{ matrix.shard }}.json
           LIMIT_PAPERS: ${{ inputs.limit_papers }}
-          STRATIFIED_SAMPLE: "0"
+          STRATIFIED_SAMPLE: ${{ inputs.stratified_sample }}
           SHARD_INDEX: ${{ matrix.shard }}
           SHARD_TOTAL: ${{ inputs.shard_total }}
           MAX_WORKERS: ${{ inputs.max_workers }}
@@ -123,7 +127,7 @@ jobs:
           OUTPUT_JSON: ${{ inputs.output_name }}
           REPORT_MD: ACL2026_refined_primary_areas_full_report.md
           LIMIT_PAPERS: ${{ inputs.limit_papers }}
-          STRATIFIED_SAMPLE: "0"
+          STRATIFIED_SAMPLE: ${{ inputs.stratified_sample }}
         run: python -u merge_refined_primary_area_shards.py
 
       - name: Upload merged result
