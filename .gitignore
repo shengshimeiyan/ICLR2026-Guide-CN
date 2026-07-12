@@ -13,6 +13,8 @@ ACL2026_missing_one_*.json
 ACL2026_papers_after_1000.json
 ACL2026_refined_categories_*.json
 ACL2026_refined_categories_*.md
+ACL2026_refined_primary_areas_*.json
+ACL2026_refined_primary_areas_*.md
 ACL2026_test*.json
 ACL2026_test*.md
 ACL2026_CN_quality_comparison.md
