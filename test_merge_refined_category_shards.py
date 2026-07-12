@@ -11,6 +11,41 @@ def write_json(path, payload):
 
 
 class MergeRefinedCategoryShardsTest(unittest.TestCase):
+    def test_merge_allows_valid_fallback_category_with_error_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "ACL2026_all_papers.json"
+            shard0 = root / "ACL2026_refined_categories_shard_0.json"
+            output = root / "full.json"
+            report = root / "report.md"
+            base_paper = {
+                "id": "p0",
+                "primary_area": "大语言模型与基础模型",
+                "category": "大语言模型与基础模型",
+            }
+            write_json(source, {"meta": {}, "papers": [base_paper]})
+            write_json(
+                shard0,
+                {
+                    "meta": {},
+                    "papers": [
+                        {
+                            **base_paper,
+                            "category": "其他基础模型",
+                            "category_refined_by": "test",
+                            "category_refine_error": "api error: rate limit",
+                        },
+                    ],
+                },
+            )
+
+            summary = merge_refined_shards(source, str(root / "ACL2026_refined_categories_shard_*.json"), output, report)
+
+            self.assertEqual([], summary["missing"])
+            self.assertEqual([], summary["invalid"])
+            self.assertEqual(["p0"], summary["error_ids"])
+            self.assertTrue(output.exists())
+
     def test_merge_respects_limit_papers_for_smoke_runs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

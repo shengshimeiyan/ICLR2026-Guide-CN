@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-from refine_categories import is_valid_refined_record, stratified_sample
+from refine_categories import stratified_sample, valid_subcategories
 
 
 INPUT_JSON = os.environ.get("INPUT_JSON", "ACL2026_all_papers.json")
@@ -32,6 +32,7 @@ def write_report(path, summary, category_counts, primary_counts):
         f"shard_files: {summary['shard_files']}",
         f"missing: {len(summary['missing'])}",
         f"invalid: {len(summary['invalid'])}",
+        f"error_warnings: {len(summary['error_ids'])}",
         f"duplicate_ids: {len(summary['duplicate_ids'])}",
         "",
         "## Top Categories",
@@ -45,6 +46,9 @@ def write_report(path, summary, category_counts, primary_counts):
     if summary["invalid"]:
         lines.extend(["", "## Invalid IDs"])
         lines.extend(f"- {pid}" for pid in summary["invalid"][:200])
+    if summary["error_ids"]:
+        lines.extend(["", "## Category Refinement Error Warnings"])
+        lines.extend(f"- {pid}" for pid in summary["error_ids"][:200])
     if summary["duplicate_ids"]:
         lines.extend(["", "## Duplicate IDs"])
         lines.extend(f"- {pid}" for pid in summary["duplicate_ids"][:200])
@@ -55,6 +59,11 @@ def select_merge_papers(papers, limit_papers=0, stratified=False):
     if not limit_papers:
         return list(papers)
     return stratified_sample(papers, limit_papers) if stratified else list(papers[:limit_papers])
+
+
+def has_valid_category(record):
+    primary = record.get("primary_area") or "其他"
+    return bool(record.get("id")) and record.get("category") in valid_subcategories(primary)
 
 
 def merge_refined_shards(source_json, shard_glob, output_json, report_md, limit_papers=0, stratified=False):
@@ -80,7 +89,12 @@ def merge_refined_shards(source_json, shard_glob, output_json, report_md, limit_
     invalid = [
         paper["id"]
         for paper in base_papers
-        if paper["id"] in refined_by_id and not is_valid_refined_record(refined_by_id[paper["id"]])
+        if paper["id"] in refined_by_id and not has_valid_category(refined_by_id[paper["id"]])
+    ]
+    error_ids = [
+        paper["id"]
+        for paper in base_papers
+        if paper["id"] in refined_by_id and refined_by_id[paper["id"]].get("category_refine_error")
     ]
 
     merged = [refined_by_id.get(paper["id"], paper) for paper in base_papers]
@@ -89,6 +103,7 @@ def merge_refined_shards(source_json, shard_glob, output_json, report_md, limit_
         "shard_files": len(shard_paths),
         "missing": missing,
         "invalid": invalid,
+        "error_ids": error_ids,
         "duplicate_ids": sorted(set(duplicate_ids)),
     }
 
@@ -129,6 +144,7 @@ def main():
     print(f"shard_files={summary['shard_files']}")
     print(f"missing={len(summary['missing'])}")
     print(f"invalid={len(summary['invalid'])}")
+    print(f"error_warnings={len(summary['error_ids'])}")
     print(f"duplicate_ids={len(summary['duplicate_ids'])}")
     print(f"report={REPORT_MD}")
     if summary["missing"] or summary["invalid"] or summary["duplicate_ids"]:
