@@ -11,14 +11,15 @@ ACL 2026 全量论文 · 两级目录静态网页渲染
 """
 
 import json
+import os
 from collections import Counter, defaultdict
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
-INPUT_JSON = "ACL2026_all_papers.json"              # 主数据源
-CN_OVERLAY_JSON = "ACL2026_all_papers_CN.json"      # 可选：中文分析 overlay（部分翻译完也能渲染）
-OUTPUT_HTML = "index.html"
+INPUT_JSON = os.environ.get("INPUT_JSON", "ACL2026_all_papers.json")
+CN_OVERLAY_JSON = os.environ.get("CN_OVERLAY_JSON", "ACL2026_all_papers_CN.json")
+OUTPUT_HTML = os.environ.get("OUTPUT_HTML", "index.html")
 
 # 6 个分析维度（与 translate_all_papers.py 输出对齐）
 DIM_LABELS = [
@@ -73,6 +74,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .main-header{margin-bottom:32px;padding-bottom:18px;border-bottom:1px solid #e1e4e8}
 .main-header h1{font-size:28px;margin-bottom:10px}
 .main-header p{color:#586069;font-size:14px}
+.info-panel{background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:14px 16px;margin:18px 0;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.info-panel h2{font-size:15px;margin-bottom:6px;color:#24292e}
+.info-panel p{font-size:12.5px;color:#586069;margin:0}
+.area-chart{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:9px 18px;margin-top:12px}
+.area-row{display:grid;grid-template-columns:minmax(96px,1fr) 120px 44px;align-items:center;gap:8px;font-size:12px}
+.area-name{color:#24292e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.area-track{height:8px;background:#eaecef;border-radius:99px;overflow:hidden}
+.area-bar{height:100%;background:#0366d6;border-radius:99px}
+.area-count{color:#6a737d;text-align:right;font-variant-numeric:tabular-nums}
+.filter-title{font-size:12px;font-weight:700;color:#586069;margin:18px 0 8px}
+.filter-hint{font-size:11px;color:#959da5;margin-top:6px}
 
 h2.pri-title{font-size:24px;color:#0366d6;border-bottom:2px solid #0366d6;padding-bottom:8px;margin:40px 0 12px;scroll-margin-top:20px}
 h2.pri-title small{font-size:13px;color:#6a737d;font-weight:400;margin-left:8px}
@@ -125,6 +137,7 @@ h3.sub-title small{font-size:12px;color:#6a737d;font-weight:400;margin-left:8px}
   .container{flex-direction:column}
   .sidebar{width:100%;height:auto;position:relative}
   .main{max-width:100%;padding:20px}
+  .area-row{grid-template-columns:minmax(90px,1fr) 90px 40px}
   .dim{flex-direction:column;gap:4px}
   .dim-label{width:auto}
 }
@@ -226,11 +239,26 @@ def build():
     total = len(papers)
     n_pri = len(primary_order)
     n_sub_total = sum(len(subs) for subs in grouped.values())
+    primary_cnt = Counter(p["primary_area"] for p in papers)
+    max_primary = max(primary_cnt.values()) if primary_cnt else 1
+    area_chart_html = []
+    for pa in primary_order:
+        count = primary_cnt[pa]
+        pct = count * 100 / total if total else 0
+        width = max(2, count * 100 / max_primary)
+        area_chart_html.append(
+            f'<div class="area-row">'
+            f'<span class="area-name" title="{escape(pa)}">{escape(pa)}</span>'
+            f'<span class="area-track"><span class="area-bar" style="width:{width:.1f}%"></span></span>'
+            f'<span class="area-count">{count} · {pct:.1f}%</span>'
+            f'</div>'
+        )
     track_cnt = Counter((p.get("track") or "Unknown Track").strip() for p in papers)
     track_chips = "".join(
         f'<span class="tier-chip" data-tier="{escape(track)}">{escape(track)} {count} 篇</span>'
         for track, count in track_cnt.most_common()
     )
+    source_label = escape(str(INPUT_JSON))
 
     # ---- 侧边栏 ----
     nav_html = []
@@ -375,10 +403,21 @@ def build():
     <div class="main-header">
       <h1>ACL 2026 全部论文 · 中文导读</h1>
       <p>优先从 ACL Anthology 拉取 ACL 2026 公开论文，共 <b>{total}</b> 篇，按 NLP/计算语言学研究方向（{n_pri} 个大类）整理。每篇论文给出"研究动机 / 解决问题 / 现象分析 / 主要方法 / 数据集与实验 / 主要贡献"六个维度的中文分析。中文内容由大语言模型基于英文 abstract 自动生成，仅供快速浏览参考，建议结合原文阅读。左侧导航点大类标题展开/收起子项；点击论文标题直达 ACL Anthology 原文。</p>
+      <div class="info-panel">
+        <h2>大类分布</h2>
+        <p>当前页面读取 <code>{source_label}</code>，按优化后的一级研究方向统计。条形长度按最大大类归一化，方便快速观察分布。</p>
+        <div class="area-chart">{''.join(area_chart_html)}</div>
+      </div>
+      <div class="info-panel">
+        <h2>一级分类优化说明</h2>
+        <p>一级分类采用“语义研究方向优先”的口径：只有主要贡献是基础模型本身的预训练、架构、对齐、推理机制、Agent、长上下文或效率时，才归入大语言模型与基础模型；如果 LLM 只是方法或工具，则按论文真正的任务、应用、评测对象或领域归类。</p>
+      </div>
+      <div class="filter-title">Track 筛选</div>
       <div class="tier-summary">
         <span class="tier-chip all active" data-tier="__all__">📚 全部 {total} 篇</span>
         {track_chips}
       </div>
+      <div class="filter-hint">点击任一 track 只显示对应来源；再次点击“全部”恢复全量。搜索框会和 track 筛选叠加生效。</div>
     </div>
     {''.join(pri_secs_html)}
   </main>
