@@ -5,3 +5,17 @@ __pycache__/
 *.bak
 ICLR2026_VLM_MLLM_中文版.html
 text_cnn_classification/
+
+# ACL 2026 intermediate outputs and local workflow artifacts
+ACL2026_after1000_*.json
+ACL2026_first1000_*.json
+ACL2026_missing_one_*.json
+ACL2026_papers_after_1000.json
+ACL2026_refined_categories_*.json
+ACL2026_refined_categories_*.md
+ACL2026_test*.json
+ACL2026_test*.md
+ACL2026_CN_quality_comparison.md
+ACL2026_all_papers_before_*.json
+ACL2026_paper_details_cache.json
+artifacts_*/

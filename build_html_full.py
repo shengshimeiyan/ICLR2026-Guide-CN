@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-ICLR 2026 全量论文 · 两级目录静态网页渲染
+ACL 2026 全量论文 · 两级目录静态网页渲染
 =========================================
-输入：ICLR2026_all_papers_CN.json（5352 篇 + 中文六维度分析）
+输入：ACL2026_all_papers.json + 可选 ACL2026_all_papers_CN.json
 输出：index.html（直接覆盖）
 
-侧边栏：大类（ICLR primary_area）/ 小类（LLM 标）双层折叠树
+侧边栏：研究方向 / 小类双层折叠树
 主体：嵌套 section + 论文卡
-保留：搜索 / 六维度展示 / 折叠完整摘要 / GoatCounter 访问统计
+保留：搜索 / track 筛选 / 六维度展示 / 折叠完整摘要 / GoatCounter 访问统计
 """
 
 import json
@@ -16,8 +16,8 @@ from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
-INPUT_JSON = "ICLR2026_all_papers.json"             # 主数据源：全 5352 篇
-CN_OVERLAY_JSON = "ICLR2026_all_papers_CN.json"     # 可选：中文分析 overlay（部分翻译完也能渲染）
+INPUT_JSON = "ACL2026_all_papers.json"              # 主数据源
+CN_OVERLAY_JSON = "ACL2026_all_papers_CN.json"      # 可选：中文分析 overlay（部分翻译完也能渲染）
 OUTPUT_HTML = "index.html"
 
 # 6 个分析维度（与 translate_all_papers.py 输出对齐）
@@ -30,13 +30,8 @@ DIM_LABELS = [
     ("主要贡献",     "⭐ 主要贡献"),
 ]
 
-# 兜底翻译（个别 primary_area 漏了中文）
-PRIMARY_AREA_FALLBACK_ZH = {
-    "learning on time series and dynamical systems": "时间序列与动力系统",
-    "learning theory": "学习理论",
-    "learning on graphs and other geometries & topologies": "图与几何拓扑学习",
-    "causal reasoning": "因果推理",
-}
+# 兜底翻译（保留给兼容旧数据或手工导入数据）
+PRIMARY_AREA_FALLBACK_ZH = {}
 
 def _norm_primary(p):
     p = (p or "").strip()
@@ -95,6 +90,8 @@ h3.sub-title small{font-size:12px;color:#6a737d;font-weight:400;margin-left:8px}
 /* 顶部档次摘要 */
 .tier-summary{margin:18px 0;display:flex;gap:8px;flex-wrap:wrap}
 .tier-chip{display:inline-flex;align-items:center;padding:5px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;user-select:none;border:1px solid transparent;transition:all .15s}
+.tier-chip{background:#f6f8fa;color:#586069;border-color:#d1d5da}
+.tier-chip.active{background:#0366d6;color:#fff;border-color:#0366d6}
 .tier-chip.all{background:#eaecef;color:#24292e}
 .tier-chip.all.active{background:#0366d6;color:#fff}
 .tier-chip.Oral{background:#fff4d4;color:#8a6500;border-color:#d4a017}
@@ -229,9 +226,11 @@ def build():
     total = len(papers)
     n_pri = len(primary_order)
     n_sub_total = sum(len(subs) for subs in grouped.values())
-    tier_cnt = Counter(p.get("tier") or "Poster" for p in papers)
-    n_oral = tier_cnt.get("Oral", 0)
-    n_spotlight = tier_cnt.get("Spotlight", 0)
+    track_cnt = Counter((p.get("track") or "Unknown Track").strip() for p in papers)
+    track_chips = "".join(
+        f'<span class="tier-chip" data-tier="{escape(track)}">{escape(track)} {count} 篇</span>'
+        for track, count in track_cnt.most_common()
+    )
 
     # ---- 侧边栏 ----
     nav_html = []
@@ -301,23 +300,22 @@ def build():
                 else:
                     dims_block = '<div class="dim no-cn">（中文六维度分析尚未生成）</div>'
 
-                tier = (p.get("tier") or "Poster").strip()
-                tier_badge_html = ""
-                if tier == "Oral":
-                    tier_badge_html = '<span class="tier-badge Oral">🎤 Oral</span>'
-                elif tier == "Spotlight":
-                    tier_badge_html = '<span class="tier-badge Spotlight">💡 Spotlight</span>'
-                paper_class = f"paper tier-{escape(tier)}"
+                track = (p.get("track") or "Unknown Track").strip()
+                track_badge_html = f'<span class="tier-badge Spotlight">{escape(track)}</span>' if track else ""
+                authors = "、".join(p.get("authors", []) or [])
+                authors_html = f'<span class="kw">{escape(authors)}</span>' if authors else ""
+                paper_class = "paper"
                 search_blob = (
                     p["title"] + " " + " ".join(kws) + " " + (tldr or "") + " "
-                    + p.get("primary_area", "") + " " + p.get("category", "") + " " + tier
+                    + p.get("primary_area", "") + " " + p.get("category", "") + " " + track + " " + authors
                 ).lower()
                 cards.append(f"""
-<article class="{paper_class}" data-search="{escape(search_blob)}" data-tier="{escape(tier)}">
-  <div class="paper-title">{tier_badge_html}<a href="{url}" target="_blank">{title}</a></div>
+<article class="{paper_class}" data-search="{escape(search_blob)}" data-tier="{escape(track)}">
+  <div class="paper-title">{track_badge_html}<a href="{url}" target="_blank">{title}</a></div>
   <div class="paper-meta">
     {f'<span class="badge">{primary_badge}</span>' if primary_badge else ''}
     {f'<span class="badge sub">{sub_badge}</span>' if sub_badge else ''}
+    {authors_html}
     {kw_html}
   </div>
   {tldr_html}
@@ -342,24 +340,24 @@ def build():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ICLR 2026 论文集 · 中文导读（{total} 篇）</title>
+<title>ACL 2026 论文集 · 中文导读（{total} 篇）</title>
 <style>{CSS}</style>
 </head>
 <body>
 <div class="container">
   <aside class="sidebar">
-    <h1>📚 ICLR 2026<br>全部论文中文导读</h1>
+    <h1>📚 ACL 2026<br>全部论文中文导读</h1>
     <div class="sub">{total} 篇 · {n_pri} 个大类 · {n_sub_total} 个细分</div>
     <input type="search" id="search" placeholder="🔍 搜索标题 / 关键词…">
     <div class="stat-grid">
       <div class="stat-box"><b>{total}</b>论文总数</div>
       <div class="stat-box"><b>{n_pri}</b>大类</div>
     </div>
-    <div style="font-size:12px;font-weight:600;color:#586069;margin-bottom:8px">📁 按 ICLR 官方研究方向 → 细分类别浏览</div>
+    <div style="font-size:12px;font-weight:600;color:#586069;margin-bottom:8px">📁 按 NLP/CL 研究方向浏览</div>
     <div class="nav-tree">{''.join(nav_html)}</div>
     <div style="margin-top:24px;padding-top:16px;border-top:1px solid #eaecef;font-size:11px;color:#959da5;line-height:1.6">
-      📊 数据来源：<br>OpenReview ICLR 2026<br>
-      （5,352 篇接收论文全部收录）<br><br>
+      📊 数据来源：<br>ACL Anthology · ACL 2026<br>
+      （公开论文以 ACL Anthology 页面为准）<br><br>
       💡 每篇论文的"六维度"由大语言模型基于 abstract 自动生成，仅供快速浏览，详见原文。<br><br>
       <span id="visit-stats" style="display:none">👁 总访问 <b id="gc-pv" style="color:#0366d6"></b> 次　·　访客 <b id="gc-uv" style="color:#0366d6"></b> 人</span>
     </div>
@@ -375,12 +373,11 @@ def build():
   </aside>
   <main class="main">
     <div class="main-header">
-      <h1>ICLR 2026 全部接收论文 · 中文导读</h1>
-      <p>从 OpenReview 拉取 ICLR 2026 全部 <b>{total}</b> 篇接收论文，按 ICLR 官方一级研究方向（{n_pri} 个大类）+ LLM 二级细分（{n_sub_total} 个小类）整理。每篇论文给出"研究动机 / 解决问题 / 现象分析 / 主要方法 / 数据集与实验 / 主要贡献"六个维度的中文分析。中文内容由大语言模型基于英文 abstract 自动生成，仅供快速浏览参考，建议结合原文阅读。左侧导航点大类标题展开/收起子项；点击论文标题直达 OpenReview 原文。</p>
+      <h1>ACL 2026 全部论文 · 中文导读</h1>
+      <p>优先从 ACL Anthology 拉取 ACL 2026 公开论文，共 <b>{total}</b> 篇，按 NLP/计算语言学研究方向（{n_pri} 个大类）整理。每篇论文给出"研究动机 / 解决问题 / 现象分析 / 主要方法 / 数据集与实验 / 主要贡献"六个维度的中文分析。中文内容由大语言模型基于英文 abstract 自动生成，仅供快速浏览参考，建议结合原文阅读。左侧导航点大类标题展开/收起子项；点击论文标题直达 ACL Anthology 原文。</p>
       <div class="tier-summary">
         <span class="tier-chip all active" data-tier="__all__">📚 全部 {total} 篇</span>
-        {f'<span class="tier-chip Oral" data-tier="Oral">🎤 Oral {n_oral} 篇</span>' if n_oral > 0 else ''}
-        {f'<span class="tier-chip Spotlight" data-tier="Spotlight">💡 Spotlight {n_spotlight} 篇</span>' if n_spotlight > 0 else ''}
+        {track_chips}
       </div>
     </div>
     {''.join(pri_secs_html)}
@@ -392,9 +389,9 @@ def build():
 """
 
     Path(OUTPUT_HTML).write_text(html, encoding="utf-8")
-    print(f"✅ 已生成 {OUTPUT_HTML}（{total} 篇 · {n_pri} 大类 · {n_sub_total} 细分 · {n_with_cn} 篇带中文分析）")
+    print(f"[OK] 已生成 {OUTPUT_HTML}（{total} 篇 · {n_pri} 大类 · {n_sub_total} 细分 · {n_with_cn} 篇带中文分析）")
     if n_with_cn < total:
-        print(f"   💡 还有 {total - n_with_cn} 篇没有中文六维度分析，等 translate_all_papers.py 跑完后再重新 build。")
+        print(f"   提示：还有 {total - n_with_cn} 篇没有中文六维度分析，等 translate_all_papers.py 跑完后再重新 build。")
 
 
 if __name__ == "__main__":
