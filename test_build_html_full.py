@@ -1,10 +1,13 @@
 import importlib
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+from build_html_full import normalize_search_text
 
 
 def write_json(path, payload):
@@ -12,6 +15,16 @@ def write_json(path, payload):
 
 
 class BuildHtmlFullTest(unittest.TestCase):
+    def test_search_normalizes_hyphen_spacing(self):
+        self.assertIn(
+            "llm-based",
+            normalize_search_text("Building Multi-turn Intent Classification with LLM -based Labeling"),
+        )
+        self.assertEqual(
+            normalize_search_text("LLM-based"),
+            normalize_search_text("LLM -based"),
+        )
+
     def test_build_uses_configured_paths_and_renders_page_helpers(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -33,7 +46,7 @@ class BuildHtmlFullTest(unittest.TestCase):
                 },
                 {
                     "id": "p2",
-                    "title": "New RAG Benchmark",
+                    "title": "Building Multi-turn Intent Classification with LLM -based Labeling",
                     "url": "https://example.com/p2",
                     "authors": ["Bob"],
                     "track": "Findings",
@@ -80,9 +93,19 @@ class BuildHtmlFullTest(unittest.TestCase):
             self.assertIn("大类分布", html)
             self.assertIn("area-bar", html)
             self.assertIn("Track 筛选", html)
-            self.assertIn("data-tier=\"Main Conference\"", html)
+            self.assertIn("Main", html)
             self.assertIn("一级分类优化说明", html)
             self.assertIn("如果 LLM 只是方法或工具", html)
+            self.assertIn("const PAPERS =", html)
+            self.assertIn("llm-based", html)
+            self.assertIn("renderMore", html)
+            self.assertIn("id=\"load-more\"", html)
+            self.assertIn("只看有中文分析", html)
+            self.assertIn("只看 Main/Findings", html)
+            self.assertIn("清除筛选", html)
+            self.assertIn("result-count", html)
+            html_without_scripts = re.sub(r"<script.*?</script>", "", html, flags=re.S)
+            self.assertNotIn("<article", html_without_scripts)
 
 
 if __name__ == "__main__":

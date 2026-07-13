@@ -12,6 +12,7 @@ ACL 2026 全量论文 · 两级目录静态网页渲染
 
 import json
 import os
+import re
 from collections import Counter, defaultdict
 from html import escape
 from pathlib import Path
@@ -39,6 +40,51 @@ def _norm_primary(p):
     if not p:
         return "(未填)"
     return PRIMARY_AREA_FALLBACK_ZH.get(p, p)
+
+
+def normalize_search_text(text):
+    text = (text or "").lower()
+    text = re.sub(r"\s*-\s*", "-", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def short_track_label(track):
+    track = (track or "Unknown Track").strip()
+    lower = track.lower()
+    if "findings of the association" in lower or track == "Findings":
+        return "Findings"
+    if "volume 1: long papers" in lower:
+        return "Main Long"
+    if "volume 2: short papers" in lower:
+        return "Main Short"
+    if "volume 3: system demonstrations" in lower:
+        return "Demo"
+    if "volume 4: student research workshop" in lower:
+        return "SRW"
+    if "volume 5: tutorial abstracts" in lower:
+        return "Tutorial"
+    if "volume 6: industry track" in lower:
+        return "Industry"
+    if track == "Main Conference":
+        return "Main"
+    if track.endswith(" 2026") and len(track) <= 28:
+        return track.replace(" 2026", "")
+    if "(" in track and ")" in track:
+        inside = track.rsplit("(", 1)[-1].split(")", 1)[0].strip()
+        if 2 <= len(inside) <= 24:
+            return inside
+    prefixes = [
+        "Proceedings of the ",
+        "Proceedings of ",
+        "The ",
+    ]
+    label = track
+    for prefix in prefixes:
+        if label.startswith(prefix):
+            label = label[len(prefix):]
+            break
+    return label[:36] + "..." if len(label) > 39 else label
 
 
 CSS = """
@@ -146,12 +192,39 @@ h3.sub-title small{font-size:12px;color:#6a737d;font-weight:400;margin-left:8px}
 
 JS = """
 const search=document.getElementById('search');
-const papers=document.querySelectorAll('.paper');
-const subSecs=document.querySelectorAll('section.sub-sec');
-const priSecs=document.querySelectorAll('section.pri-sec');
 const tierChips=document.querySelectorAll('.tier-chip');
+const quickCn=document.getElementById('quick-cn');
+const quickMainFindings=document.getElementById('quick-main-findings');
+const clearFilters=document.getElementById('clear-filters');
+const resultCount=document.getElementById('result-count');
+const filterSummary=document.getElementById('filter-summary');
+const results=document.getElementById('results');
+const loadMore=document.getElementById('load-more');
 
-let activeTier='__all__';
+const BATCH_SIZE=80;
+const DIM_LABELS=[
+  ['研究动机','🎯 研究动机'],
+  ['解决问题','❓ 解决问题'],
+  ['现象分析','🔍 现象分析'],
+  ['主要方法','🛠️ 主要方法'],
+  ['数据集与实验','📊 数据与实验'],
+  ['主要贡献','⭐ 主要贡献']
+];
+
+let activeTrack='__all__';
+let activePrimary='';
+let activeCategory='';
+let onlyCn=false;
+let mainFindingsOnly=false;
+let renderedCount=0;
+let currentMatches=[];
+
+function esc(s){
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function normalizeSearchText(s){
+  return String(s||'').toLowerCase().replace(/\\s*-\\s*/g,'-').replace(/\\s+/g,' ').trim();
+}
 
 // 大类折叠/展开
 document.querySelectorAll('.nav-pri-head').forEach(h=>{
@@ -161,50 +234,118 @@ document.querySelectorAll('.nav-pri-head').forEach(h=>{
   });
 });
 
+document.querySelectorAll('.nav-filter').forEach(a=>{
+  a.addEventListener('click', e=>{
+    e.preventDefault();
+    activePrimary=a.dataset.primary||'';
+    activeCategory=a.dataset.category||'';
+    renderedCount=0;
+    applyFilters();
+    document.getElementById('results-panel').scrollIntoView({behavior:'smooth',block:'start'});
+  });
+});
+
+function matchesPaper(p, q){
+  const matchSearch=!q || (p.search||'').includes(q);
+  const matchTrack=(activeTrack==='__all__') || (p.track===activeTrack);
+  const matchPrimary=!activePrimary || p.primary===activePrimary;
+  const matchCategory=!activeCategory || p.category===activeCategory;
+  const matchCn=!onlyCn || !!p.analysis;
+  const matchMainFindings=!mainFindingsOnly || p.trackLabel.startsWith('Main') || p.trackLabel==='Findings';
+  return matchSearch && matchTrack && matchPrimary && matchCategory && matchCn && matchMainFindings;
+}
+
+function paperCard(p){
+  const authors=(p.authors||[]).join('、');
+  const kws=(p.keywords||[]).map(k=>`<span class="kw">#${esc(k)}</span>`).join(' ');
+  const tldr=p.tldr ? `<div class="paper-tldr"><b>TL;DR：</b>${esc(p.tldr)}</div>` : '';
+  let dims='<div class="dim no-cn">（中文六维度分析尚未生成）</div>';
+  if(p.analysis){
+    dims=DIM_LABELS.map(([key,label])=>{
+      return `<div class="dim"><span class="dim-label">${label}</span><div class="dim-content">${esc(p.analysis[key]||'')}</div></div>`;
+    }).join('');
+  }
+  return `<${'article'} class="paper">
+    <div class="paper-title"><span class="tier-badge Spotlight" title="${esc(p.track)}">${esc(p.trackLabel)}</span><a href="${esc(p.url||'#')}" target="_blank">${esc(p.title)}</a></div>
+    <div class="paper-meta">
+      <span class="badge">${esc(p.primary)}</span>
+      <span class="badge sub">${esc(p.category)}</span>
+      ${authors ? `<span class="kw">${esc(authors)}</span>` : ''}
+      ${kws}
+    </div>
+    ${tldr}
+    ${dims}
+    <span class="toggle-abs" onclick="this.parentElement.classList.toggle('expanded')">查看完整摘要 (Abstract)</span>
+    <div class="full-abs">${esc(p.abstract||'')}</div>
+  </${'article'}>`;
+}
+
+function renderMore(){
+  const next=currentMatches.slice(renderedCount, renderedCount+BATCH_SIZE);
+  results.insertAdjacentHTML('beforeend', next.map(paperCard).join(''));
+  renderedCount += next.length;
+  loadMore.classList.toggle('hidden', renderedCount>=currentMatches.length);
+}
+
+function describeFilters(){
+  const parts=[];
+  if(activePrimary) parts.push(activeCategory ? `${activePrimary} / ${activeCategory}` : activePrimary);
+  if(activeTrack!=='__all__'){
+    const p=PAPERS.find(x=>x.track===activeTrack);
+    parts.push(p ? p.trackLabel : activeTrack);
+  }
+  if(onlyCn) parts.push('有中文分析');
+  if(mainFindingsOnly) parts.push('Main/Findings');
+  return parts.length ? parts.join(' · ') : '全部论文';
+}
+
 function applyFilters(){
-  const q=(search.value||'').trim().toLowerCase();
-  papers.forEach(p=>{
-    const t=p.dataset.search||'';
-    const myTier=p.dataset.tier||'Poster';
-    const matchSearch=!q || t.includes(q);
-    const matchTier=(activeTier==='__all__') || (myTier===activeTier);
-    p.classList.toggle('hidden', !(matchSearch && matchTier));
-  });
-  // 重新计数 + 隐藏空 section
-  subSecs.forEach(s=>{
-    const visible=s.querySelectorAll('.paper:not(.hidden)').length;
-    s.classList.toggle('hidden', visible===0);
-    const sublink=document.querySelector('.nav-sub-list a[href="#'+s.id+'"]');
-    if(sublink){
-      const cnt=sublink.querySelector('.count');
-      if(cnt) cnt.textContent='('+visible+')';
-      sublink.classList.toggle('hidden', visible===0);
-    }
-  });
-  priSecs.forEach(s=>{
-    const visible=s.querySelectorAll('.paper:not(.hidden)').length;
-    s.classList.toggle('hidden', visible===0);
-    const prinav=document.getElementById('nav-'+s.id);
-    if(prinav){
-      const cnt=prinav.querySelector('.nav-pri-head .count');
-      if(cnt) cnt.textContent=visible;
-      prinav.classList.toggle('hidden', visible===0);
-      // 在有筛选条件时自动展开有结果的大类
-      const filtering = q || activeTier!=='__all__';
-      if(filtering && visible>0) prinav.classList.add('expanded');
-      if(!filtering) prinav.classList.remove('expanded');
-    }
-  });
+  const q=normalizeSearchText(search.value||'');
+  currentMatches=PAPERS.filter(p=>matchesPaper(p,q));
+  renderedCount=0;
+  results.innerHTML='';
+  resultCount.textContent=`${currentMatches.length} / ${PAPERS.length} 篇`;
+  filterSummary.textContent=describeFilters();
+  renderMore();
+  if(currentMatches.length===0){
+    results.innerHTML='<div class="empty">没有匹配的论文。试试清除筛选或缩短搜索词。</div>';
+    loadMore.classList.add('hidden');
+  }
 }
 
 search.addEventListener('input', applyFilters);
 tierChips.forEach(chip=>{
   chip.addEventListener('click', ()=>{
-    activeTier = chip.dataset.tier;
+    activeTrack = chip.dataset.tier;
     tierChips.forEach(c => c.classList.toggle('active', c===chip));
+    renderedCount=0;
     applyFilters();
   });
 });
+quickCn.addEventListener('click',()=>{
+  onlyCn=!onlyCn;
+  quickCn.classList.toggle('active', onlyCn);
+  applyFilters();
+});
+quickMainFindings.addEventListener('click',()=>{
+  mainFindingsOnly=!mainFindingsOnly;
+  quickMainFindings.classList.toggle('active', mainFindingsOnly);
+  applyFilters();
+});
+clearFilters.addEventListener('click',()=>{
+  activeTrack='__all__';
+  activePrimary='';
+  activeCategory='';
+  onlyCn=false;
+  mainFindingsOnly=false;
+  search.value='';
+  tierChips.forEach(c => c.classList.toggle('active', c.dataset.tier==='__all__'));
+  quickCn.classList.remove('active');
+  quickMainFindings.classList.remove('active');
+  applyFilters();
+});
+loadMore.addEventListener('click', renderMore);
+applyFilters();
 """
 
 
@@ -255,7 +396,8 @@ def build():
         )
     track_cnt = Counter((p.get("track") or "Unknown Track").strip() for p in papers)
     track_chips = "".join(
-        f'<span class="tier-chip" data-tier="{escape(track)}">{escape(track)} {count} 篇</span>'
+        f'<span class="tier-chip" data-tier="{escape(track)}" title="{escape(track)}">'
+        f'{escape(short_track_label(track))} {count} 篇</span>'
         for track, count in track_cnt.most_common()
     )
     source_label = escape(str(INPUT_JSON))
@@ -275,7 +417,8 @@ def build():
         for sub, items in subs_sorted:
             sub_anchor = "sub-" + quote(pa, safe="") + "-" + quote(sub, safe="")
             sub_links.append(
-                f'<a href="#{sub_anchor}"><span class="name">{escape(sub)}</span>'
+                f'<a href="#results-panel" class="nav-filter" data-primary="{escape(pa)}" data-category="{escape(sub)}">'
+                f'<span class="name">{escape(sub)}</span>'
                 f'<span class="count">({len(items)})</span></a>'
             )
         nav_html.append(f"""
@@ -288,80 +431,33 @@ def build():
   <div class="nav-sub-list">{''.join(sub_links)}</div>
 </div>""")
 
-    # ---- 正文 ----
-    pri_secs_html = []
-    for pa in primary_order:
-        sub_dict = grouped[pa]
-        subs_sorted = sorted(
-            sub_dict.items(),
-            key=lambda kv: (kv[0] == "其他" or kv[0].startswith("其他"), -len(kv[1]), kv[0])
+    compact_papers = []
+    for p in papers:
+        track = (p.get("track") or "Unknown Track").strip()
+        authors = p.get("authors", []) or []
+        keywords = p.get("keywords", []) or []
+        analysis = p.get("中文分析") or None
+        search_blob = normalize_search_text(
+            p.get("title", "") + " " + " ".join(keywords) + " " + (p.get("tldr") or "") + " "
+            + p.get("primary_area", "") + " " + p.get("category", "") + " " + track + " "
+            + short_track_label(track) + " " + " ".join(authors)
         )
-        pa_anchor = "pri-" + quote(pa, safe="")
-        pa_count = sum(len(v) for v in sub_dict.values())
-
-        sub_secs_html = []
-        for sub, items in subs_sorted:
-            sub_anchor = "sub-" + quote(pa, safe="") + "-" + quote(sub, safe="")
-            cards = []
-            for p in items:
-                title = escape(p["title"])
-                url = escape(p.get("url", "#"))
-                primary_badge = escape(p.get("primary_area", "") or "")
-                sub_badge = escape(p.get("category", "") or "")
-                kws = p.get("keywords", []) or []
-                kw_html = " ".join(f'<span class="kw">#{escape(k)}</span>' for k in kws)
-                tldr = p.get("tldr") or ""
-                tldr_html = (
-                    f'<div class="paper-tldr"><b>TL;DR：</b>{escape(tldr)}</div>'
-                    if tldr else ""
-                )
-                analysis = p.get("中文分析") or {}
-                if analysis:
-                    dims_html = []
-                    for key, label in DIM_LABELS:
-                        val = analysis.get(key, "") or ""
-                        dims_html.append(
-                            f'<div class="dim"><span class="dim-label">{label}</span>'
-                            f'<div class="dim-content">{escape(val)}</div></div>'
-                        )
-                    dims_block = ''.join(dims_html)
-                else:
-                    dims_block = '<div class="dim no-cn">（中文六维度分析尚未生成）</div>'
-
-                track = (p.get("track") or "Unknown Track").strip()
-                track_badge_html = f'<span class="tier-badge Spotlight">{escape(track)}</span>' if track else ""
-                authors = "、".join(p.get("authors", []) or [])
-                authors_html = f'<span class="kw">{escape(authors)}</span>' if authors else ""
-                paper_class = "paper"
-                search_blob = (
-                    p["title"] + " " + " ".join(kws) + " " + (tldr or "") + " "
-                    + p.get("primary_area", "") + " " + p.get("category", "") + " " + track + " " + authors
-                ).lower()
-                cards.append(f"""
-<article class="{paper_class}" data-search="{escape(search_blob)}" data-tier="{escape(track)}">
-  <div class="paper-title">{track_badge_html}<a href="{url}" target="_blank">{title}</a></div>
-  <div class="paper-meta">
-    {f'<span class="badge">{primary_badge}</span>' if primary_badge else ''}
-    {f'<span class="badge sub">{sub_badge}</span>' if sub_badge else ''}
-    {authors_html}
-    {kw_html}
-  </div>
-  {tldr_html}
-  {dims_block}
-  <span class="toggle-abs" onclick="this.parentElement.classList.toggle('expanded')">查看完整摘要 (Abstract)</span>
-  <div class="full-abs">{escape(p.get('abstract','') or '')}</div>
-</article>""")
-            sub_secs_html.append(f"""
-<section id="{sub_anchor}" class="sub-sec">
-  <h3 class="sub-title">{escape(sub)}<small>{len(items)} 篇</small></h3>
-  {''.join(cards)}
-</section>""")
-
-        pri_secs_html.append(f"""
-<section id="{pa_anchor}" class="pri-sec">
-  <h2 class="pri-title">{escape(pa)}<small>{pa_count} 篇 · {len(subs_sorted)} 个细分</small></h2>
-  {''.join(sub_secs_html)}
-</section>""")
+        compact_papers.append({
+            "id": p.get("id", ""),
+            "title": p.get("title", ""),
+            "url": p.get("url", "#"),
+            "authors": authors,
+            "track": track,
+            "trackLabel": short_track_label(track),
+            "primary": p.get("primary_area", ""),
+            "category": p.get("category", ""),
+            "keywords": keywords,
+            "tldr": p.get("tldr") or "",
+            "abstract": p.get("abstract", "") or "",
+            "analysis": analysis,
+            "search": search_blob,
+        })
+    papers_json = json.dumps(compact_papers, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -418,10 +514,22 @@ def build():
         {track_chips}
       </div>
       <div class="filter-hint">点击任一 track 只显示对应来源；再次点击“全部”恢复全量。搜索框会和 track 筛选叠加生效。</div>
+      <div class="filter-title">快捷筛选</div>
+      <div class="tier-summary">
+        <button id="quick-cn" class="tier-chip" type="button">只看有中文分析</button>
+        <button id="quick-main-findings" class="tier-chip" type="button">只看 Main/Findings</button>
+        <button id="clear-filters" class="tier-chip" type="button">清除筛选</button>
+      </div>
     </div>
-    {''.join(pri_secs_html)}
+    <section id="results-panel">
+      <h2 class="pri-title">论文列表 <small id="result-count">{total} / {total} 篇</small></h2>
+      <div class="filter-hint">当前筛选：<span id="filter-summary">全部论文</span>。为提升加载速度，页面每次只渲染前 80 条结果。</div>
+      <div id="results"></div>
+      <button id="load-more" class="tier-chip all" type="button">加载更多</button>
+    </section>
   </main>
 </div>
+<script>const PAPERS = {papers_json};</script>
 <script>{JS}</script>
 </body>
 </html>
