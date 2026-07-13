@@ -44,7 +44,9 @@ def _norm_primary(p):
 
 def normalize_search_text(text):
     text = (text or "").lower()
-    text = re.sub(r"\s*-\s*", "-", text)
+    text = re.sub(r"[\u2010-\u2015\u2212]", "-", text)
+    text = re.sub(r"['\"`“”‘’「」『』《》]", "", text)
+    text = re.sub(r"[^\w\u4e00-\u9fff]+", " ", text, flags=re.UNICODE)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -223,7 +225,13 @@ function esc(s){
   return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function normalizeSearchText(s){
-  return String(s||'').toLowerCase().replace(/\\s*-\\s*/g,'-').replace(/\\s+/g,' ').trim();
+  return String(s||'')
+    .toLowerCase()
+    .replace(/[\\u2010-\\u2015\\u2212]/g,'-')
+    .replace(/['"`“”‘’「」『』《》]/g,'')
+    .replace(/[^\\p{L}\\p{N}_]+/gu,' ')
+    .replace(/\\s+/g,' ')
+    .trim();
 }
 
 // 大类折叠/展开

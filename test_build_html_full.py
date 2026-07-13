@@ -16,14 +16,25 @@ def write_json(path, payload):
 
 class BuildHtmlFullTest(unittest.TestCase):
     def test_search_normalizes_hyphen_spacing(self):
+        normalized_title = normalize_search_text(
+            "Building Multi-turn Intent Classification with LLM -based Labeling"
+        )
         self.assertIn(
-            "llm-based",
-            normalize_search_text("Building Multi-turn Intent Classification with LLM -based Labeling"),
+            normalize_search_text("LLM-based"),
+            normalized_title,
         )
         self.assertEqual(
             normalize_search_text("LLM-based"),
             normalize_search_text("LLM -based"),
         )
+
+    def test_search_normalizes_quotes_and_punctuation(self):
+        normalized_title = normalize_search_text(
+            "IUQ: Interrogative Uncertainty Quantification for Long-Form Large Language Model Generation"
+        )
+        self.assertEqual("iuq", normalize_search_text('“IUQ"'))
+        self.assertIn(normalize_search_text("IUQ"), normalized_title)
+        self.assertIn(normalize_search_text("IUQ Interrogative"), normalized_title)
 
     def test_build_uses_configured_paths_and_renders_page_helpers(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -97,7 +108,7 @@ class BuildHtmlFullTest(unittest.TestCase):
             self.assertIn("一级分类优化说明", html)
             self.assertIn("如果 LLM 只是方法或工具", html)
             self.assertIn("const PAPERS =", html)
-            self.assertIn("llm-based", html)
+            self.assertIn("llm based", html)
             self.assertIn("renderMore", html)
             self.assertIn("id=\"load-more\"", html)
             self.assertIn("只看有中文分析", html)
